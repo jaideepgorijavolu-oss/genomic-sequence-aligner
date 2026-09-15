@@ -26,24 +26,24 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 
 - **Dual-Backend Architecture:** Seamlessly toggle between compiled C++ and pure Python backends via `use_cpp=True/False`.
 - **Hardware & Memory Optimization:** C++ core utilizes flattened 1D `std::vector<int>` memory indexing to guarantee contiguous memory layout, maximizing L1/L2 cache locality and bypassing CPython object-boxing overhead.
-- **Up to 80.5x Execution Speedup:** Reduces alignment latency on 1,200 bp sequences from ~0.69s down to 8.9ms.
+- **Competitive Throughput:** Consistently achieves up to a **93.9x speedup over pure Python** and executes **1.5x–1.9x faster than Biopython's C core**.
 - **Pointer Traceback:** Complete path reconstruction outputting aligned sequences with gap characters (`-`).
-- **Empirical Benchmarking & Testing:** Automated runtime profiling across sequence scaling tiers ($50 \times 50$ to $1200 \times 1200$) with Pytest verification across both backends.
+- **Empirical Benchmarking & Testing:** Automated runtime profiling across sequence scaling tiers ($50 \times 50$ to $1200 \times 1200$) comparing Pure Python, Biopython (`Bio.Align`), and the custom C++ engine with automated Pytest verification.
 
 ---
 
 ## Performance Benchmark
 
-Benchmarked across matching sequence lengths ($50$ to $1,200\text{ bp}$) comparing pure Python against the C++ extension (`benchmark.py`):
+Benchmarked across identical random DNA sequences comparing pure Python, Biopython (`Bio.Align.PairwiseAligner`), and the custom C++ core (`benchmark.py`):
 
-| Sequence Length (bp) | Pure Python (s) | C++ Extension (s) | Speedup |
-|:---------------------|:----------------|:------------------|:--------|
-| 50                   | 0.00109         | 0.00003           | 38.4x   |
-| 100                  | 0.00388         | 0.00006           | 67.8x   |
-| 200                  | 0.01588         | 0.00022           | 72.9x   |
-| 400                  | 0.06810         | 0.00085           | 80.5x   |
-| 800                  | 0.28949         | 0.00423           | 68.4x   |
-| 1200                 | 0.68748         | 0.00892           | 77.1x   |
+| Sequence Length (bp) | Pure Python (s) | Biopython (s) | Custom C++ (s) | Speedup vs Py | Speedup vs Bio |
+|:---------------------|:----------------|:--------------|:---------------|:--------------|:---------------|
+| 50                   | 0.00109         | 0.00002       | 0.00002        | 65.0x         | 1.5x           |
+| 100                  | 0.00542         | 0.00011       | 0.00006        | 93.9x         | 1.8x           |
+| 200                  | 0.01856         | 0.00043       | 0.00022        | 84.8x         | 1.9x           |
+| 400                  | 0.06480         | 0.00166       | 0.00085        | 76.2x         | 1.9x           |
+| 800                  | 0.28018         | 0.00665       | 0.00407        | 68.8x         | 1.6x           |
+| 1200                 | 0.68223         | 0.01518       | 0.00872        | 78.3x         | 1.7x           |
 
 ![Benchmark Plot](complexity_benchmark.png)
 
@@ -56,9 +56,72 @@ genomic-sequence-aligner/
 ├── src/
 │   └── aligner_core.cpp      # C++ dynamic programming inner loops & pybind11 module
 ├── aligner.py                # Python interface with dynamic C++/Python backend selection
-├── benchmark.py              # Empirical runtime profiler & matplotlib plotting
+├── benchmark.py              # 3-way empirical runtime profiler & matplotlib plotting
 ├── test_aligner.py           # Pytest unit verification suite
 ├── setup.py                  # C++ pybind11 extension compilation script
 ├── complexity_benchmark.png  # Generated runtime scaling comparison
 ├── requirements.txt          # Python dependencies
 └── README.md
+```
+
+---
+
+## Quickstart
+
+### 1. Installation & Environment Setup
+
+```bash
+git clone https://github.com/jaideepgorijavolu-oss/genomic-sequence-aligner.git
+cd genomic-sequence-aligner
+
+python -m venv venv
+# On Windows:
+.\venv\Scripts\Activate.ps1
+# On macOS/Linux:
+source venv/bin/activate
+
+pip install -r requirements.txt
+```
+
+### 2. Compile C++ Core Extension
+
+Compile the optimized backend module in-place:
+
+```bash
+python setup.py build_ext --inplace
+```
+
+---
+
+## Usage
+
+```python
+from aligner import SequenceAligner
+
+# Initialize aligner (defaults to C++ backend if compiled)
+aligner = SequenceAligner(match_score=2, mismatch_penalty=-1, gap_penalty=-2, use_cpp=True)
+
+# 1. Global Alignment (Needleman-Wunsch)
+seq1 = "GATTACA"
+seq2 = "GCATGCU"
+aligned1, aligned2, score = aligner.needleman_wunsch(seq1, seq2)
+print(f"Global Alignment (Score: {score}):\n{aligned1}\n{aligned2}")
+
+# 2. Local Alignment (Smith-Waterman)
+seqA = "AAAAAGATTACATTTTT"
+seqB = "CCCCCGATTACAGGGGG"
+sub1, sub2, local_score = aligner.smith_waterman(seqA, seqB)
+print(f"\nLocal Motif Match (Score: {local_score}):\n{sub1}\n{sub2}")
+```
+
+---
+
+## Verification & Profiling
+
+```bash
+# Run test suite
+pytest -v
+
+# Run comparative 3-way benchmark and regenerate complexity plot
+python benchmark.py
+```
