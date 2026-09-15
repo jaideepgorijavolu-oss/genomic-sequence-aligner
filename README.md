@@ -1,8 +1,8 @@
-# Pairwise Genomic Sequence Alignment Engine
+# Pairwise Genomic Sequence Alignment Engine (C++ / Python)
 
-A lightweight algorithmic engine implementing dynamic programming algorithms for pairwise biological sequence alignment (DNA/RNA/Protein): **Needleman-Wunsch** (Global Alignment) and **Smith-Waterman** (Local Alignment).
+A high-performance algorithmic engine implementing dynamic programming algorithms for pairwise biological sequence alignment (DNA/RNA/Protein): **Needleman-Wunsch** (Global Alignment) and **Smith-Waterman** (Local Alignment).
 
-Includes configurable scoring parameters (match rewards, mismatch penalties, linear gap penalties), pointer-based traceback path reconstruction, empirical complexity benchmarking, and a unit test suite.
+Features a modular dual-backend architecture: an optimized **C++ extension via `pybind11`** utilizing contiguous 1D row-major indexing for cache efficiency, alongside an interpretable pure-Python reference implementation with automatic fallback.
 
 ---
 
@@ -18,39 +18,47 @@ Includes configurable scoring parameters (match rewards, mismatch penalties, lin
 - **Goal:** Identifies the highest-scoring local homologous subregion/motif embedded within divergent or noisy sequences.
 - **Recurrence Relation:**
   $$M[i, j] = \max \begin{cases} 0 \\ M[i-1, j-1] + S(x_i, y_j) \\ M[i-1, j] + d \\ M[i, j-1] + d \end{cases}$$
-- **Traceback:** Initiates at the maximum score in the entire matrix and terminates when encountering a cell with score 0.
+- **Traceback:** Initiates at the maximum score across the matrix and terminates upon encountering a cell with score 0.
 
 ---
 
 ## Features
 
-- **Object-Oriented Design:** Configurable `SequenceAligner` class supporting custom match scores, mismatch penalties, and gap costs.
-- **Pointer Traceback:** Reconstructs alignment strings with insertion/deletion gap characters (`-`).
-- **Empirical Complexity Benchmarking:** Profiles execution time across variable input lengths ($50 \times 50$ to $1200 \times 1200$) to verify quadratic asymptotic scaling.
-- **Automated Verification:** Comprehensive test suite testing exact matches, gap insertion logic, and conserved local motif isolation.
+- **Dual-Backend Architecture:** Seamlessly toggle between compiled C++ and pure Python backends via `use_cpp=True/False`.
+- **Hardware & Memory Optimization:** C++ core utilizes flattened 1D `std::vector<int>` memory indexing to guarantee contiguous memory layout, maximizing L1/L2 cache locality and bypassing CPython object-boxing overhead.
+- **Up to 80.5x Execution Speedup:** Reduces alignment latency on 1,200 bp sequences from ~0.69s down to 8.9ms.
+- **Pointer Traceback:** Complete path reconstruction outputting aligned sequences with gap characters (`-`).
+- **Empirical Benchmarking & Testing:** Automated runtime profiling across sequence scaling tiers ($50 \times 50$ to $1200 \times 1200$) with Pytest verification across both backends.
+
+---
+
+## Performance Benchmark
+
+Benchmarked across matching sequence lengths ($50$ to $1,200\text{ bp}$) comparing pure Python against the C++ extension (`benchmark.py`):
+
+| Sequence Length (bp) | Pure Python (s) | C++ Extension (s) | Speedup |
+|:---------------------|:----------------|:------------------|:--------|
+| 50                   | 0.00109         | 0.00003           | 38.4x   |
+| 100                  | 0.00388         | 0.00006           | 67.8x   |
+| 200                  | 0.01588         | 0.00022           | 72.9x   |
+| 400                  | 0.06810         | 0.00085           | 80.5x   |
+| 800                  | 0.28949         | 0.00423           | 68.4x   |
+| 1200                 | 0.68748         | 0.00892           | 77.1x   |
+
+![Benchmark Plot](complexity_benchmark.png)
 
 ---
 
 ## Project Structure
 
 ```text
-├── aligner.py                # Core dynamic programming alignment classes
+genomic-sequence-aligner/
+├── src/
+│   └── aligner_core.cpp      # C++ dynamic programming inner loops & pybind11 module
+├── aligner.py                # Python interface with dynamic C++/Python backend selection
 ├── benchmark.py              # Empirical runtime profiler & matplotlib plotting
-├── test_aligner.py           # Pytest unit test suite
-├── complexity_benchmark.png  # Generated runtime scaling curve
-├── requirements.txt          # Project dependencies
+├── test_aligner.py           # Pytest unit verification suite
+├── setup.py                  # C++ pybind11 extension compilation script
+├── complexity_benchmark.png  # Generated runtime scaling comparison
+├── requirements.txt          # Python dependencies
 └── README.md
-
-
-Quickstart
-1. Installation
-git clone [https://github.com/jaideepgorijavolu-oss/genomic-sequence-aligner.git](https://github.com/jaideepgorijavolu-oss/genomic-sequence-aligner.git)
-cd genomic-sequence-aligner
-
-python -m venv venv
-# On Windows:
-.\venv\Scripts\Activate.ps1
-# On macOS/Linux:
-source venv/bin/activate
-
-pip install -r requirements.txt

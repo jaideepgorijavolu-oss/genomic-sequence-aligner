@@ -4,49 +4,54 @@ import matplotlib.pyplot as plt
 from aligner import SequenceAligner
 
 def generate_random_sequence(length: int) -> str:
-    bases = ["A", "C", "G", "T"]
-    return "".join(random.choices(bases, k=length))
+    return "".join(random.choices(["A", "C", "G", "T"], k=length))
+
+def time_alignment(aligner_instance, s1: str, s2: str, runs: int = 3) -> float:
+    times = []
+    for _ in range(runs):
+        start = time.perf_counter()
+        aligner_instance.needleman_wunsch(s1, s2)
+        times.append(time.perf_counter() - start)
+    return min(times)
 
 def run_benchmarks():
-    aligner = SequenceAligner()
+    py_aligner = SequenceAligner(use_cpp=False)
+    cpp_aligner = SequenceAligner(use_cpp=True)
+
     lengths = [50, 100, 200, 400, 800, 1200]
-    nw_times = []
-    sw_times = []
+    py_times = []
+    cpp_times = []
 
-    print("Running sequence alignment empirical complexity benchmarks...\n")
+    print(f"{'Length':<10} | {'Python (s)':<12} | {'C++ (s)':<12} | {'Speedup':<10}")
+    print("-" * 52)
 
-    for n in lengths:
-        s1 = generate_random_sequence(n)
-        s2 = generate_random_sequence(n)
+    for l in lengths:
+        s1 = generate_random_sequence(l)
+        s2 = generate_random_sequence(l)
 
-        # Benchmark Needleman-Wunsch
-        start = time.perf_counter()
-        aligner.needleman_wunsch(s1, s2)
-        nw_duration = time.perf_counter() - start
-        nw_times.append(nw_duration)
+        # Time pure Python
+        t_py = time_alignment(py_aligner, s1, s2)
+        py_times.append(t_py)
 
-        # Benchmark Smith-Waterman
-        start = time.perf_counter()
-        aligner.smith_waterman(s1, s2)
-        sw_duration = time.perf_counter() - start
-        sw_times.append(sw_duration)
+        # Time C++ extension
+        t_cpp = time_alignment(cpp_aligner, s1, s2)
+        cpp_times.append(t_cpp)
 
-        print(f"Sequence Length: {n}x{n} | NW: {nw_duration:.4f}s | SW: {sw_duration:.4f}s")
+        speedup = t_py / t_cpp if t_cpp > 0 else 0
+        print(f"{l:<10} | {t_py:<12.5f} | {t_cpp:<12.5f} | {speedup:<10.1f}x")
 
-    # Plot empirical O(n^2) scaling curve
-    plt.figure(figsize=(8, 5))
-    plt.plot(lengths, nw_times, marker="o", label="Needleman-Wunsch (Global)")
-    plt.plot(lengths, sw_times, marker="s", label="Smith-Waterman (Local)")
-    plt.title("Pairwise Alignment Runtime Scaling: Empirical O(n^2)")
-    plt.xlabel("Sequence Length (N)")
+    # Plot results
+    plt.figure(figsize=(9, 5))
+    plt.plot(lengths, py_times, label="Pure Python", marker="o", color="#d9534f")
+    plt.plot(lengths, cpp_times, label="C++ (pybind11)", marker="s", color="#0275d8")
+    plt.title("Needleman-Wunsch Execution Time vs Sequence Length")
+    plt.xlabel("Sequence Length (bp)")
     plt.ylabel("Execution Time (seconds)")
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.legend()
     plt.tight_layout()
-
-    output_file = "complexity_benchmark.png"
-    plt.savefig(output_file, dpi=300)
-    print(f"\nComplexity plot saved as '{output_file}'.")
+    plt.savefig("complexity_benchmark.png", dpi=300)
+    print("\nSaved benchmark plot to complexity_benchmark.png")
 
 if __name__ == "__main__":
     run_benchmarks()
