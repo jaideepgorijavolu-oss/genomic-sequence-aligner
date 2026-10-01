@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install dependencies
+        run: python -m pip install pybind11 setuptools pytest biopython
+      - name: Build C++ extension
+        run: python setup.py build_ext --inplace
+      - name: Test (C++ and Python backends, checked against Biopython)
+        env:
+          REQUIRE_CPP: "1"
+        run: python -m pytest -v
+      - name: CLI smoke test
+        run: python align_cli.py ACGTTTTACG ACGACG --mode affine

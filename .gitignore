@@ -24,4 +24,5 @@ dist/
 
 # VS Code settings
 .vscode/
-*.swp
+*.swp*.pdb
+*.lib

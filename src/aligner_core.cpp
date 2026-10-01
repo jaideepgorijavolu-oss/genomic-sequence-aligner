@@ -9,7 +9,7 @@
 namespace py = pybind11;
 
 // Large negative sentinel to avoid arithmetic underflow during additions
-constexpr int NEG_INF = -1e8;
+constexpr int NEG_INF = -100000000;
 
 // Row-major 1D indexing helper
 inline size_t idx(size_t i, size_t j, size_t stride) {
@@ -327,7 +327,12 @@ std::tuple<std::string, std::string, int> hirschberg_cpp(
     int mismatch_penalty,
     int gap_penalty
 ) {
-    auto alignment = hirschberg_recursive(seq1, seq2, match_score, mismatch_penalty, gap_penalty);
+    // DP rows span seq2, so recurse with the shorter sequence second: O(min(m, n)) DP memory.
+    const bool swap = seq2.length() > seq1.length();
+    auto alignment = swap
+        ? hirschberg_recursive(seq2, seq1, match_score, mismatch_penalty, gap_penalty)
+        : hirschberg_recursive(seq1, seq2, match_score, mismatch_penalty, gap_penalty);
+    if (swap) std::swap(alignment.first, alignment.second);
 
     // Compute final alignment score
     int score = 0;
@@ -342,14 +347,31 @@ std::tuple<std::string, std::string, int> hirschberg_cpp(
     return std::make_tuple(alignment.first, alignment.second, score);
 }
 
+// Score-only global alignment in two rows of length min(m, n) + 1 (no traceback).
+int nw_score_cpp(
+    const std::string& seq1,
+    const std::string& seq2,
+    int match_score,
+    int mismatch_penalty,
+    int gap_penalty
+) {
+    const bool swap = seq2.length() > seq1.length();
+    return swap ? nw_score_row(seq2, seq1, match_score, mismatch_penalty, gap_penalty).back()
+                : nw_score_row(seq1, seq2, match_score, mismatch_penalty, gap_penalty).back();
+}
+
 // ============================================================================
 // PYBIND11 MODULE EXPORT
 // ============================================================================
 
 PYBIND11_MODULE(aligner_core, m) {
     m.doc() = "High-performance C++ Sequence Alignment DP Kernels";
-    m.def("needleman_wunsch_cpp", &needleman_wunsch_cpp, "Needleman-Wunsch global alignment");
-    m.def("smith_waterman_cpp", &smith_waterman_cpp, "Smith-Waterman local alignment");
-    m.def("gotoh_cpp", &gotoh_cpp, "Gotoh affine gap penalty global alignment");
-    m.def("hirschberg_cpp", &hirschberg_cpp, "Hirschberg linear space global alignment");
+    // Arguments are converted to std::string before the call, so the kernels can run
+    // without the GIL and alignments in other Python threads proceed in parallel.
+    using release_gil = py::call_guard<py::gil_scoped_release>;
+    m.def("needleman_wunsch_cpp", &needleman_wunsch_cpp, "Needleman-Wunsch global alignment", release_gil());
+    m.def("smith_waterman_cpp", &smith_waterman_cpp, "Smith-Waterman local alignment", release_gil());
+    m.def("gotoh_cpp", &gotoh_cpp, "Gotoh affine gap penalty global alignment", release_gil());
+    m.def("hirschberg_cpp", &hirschberg_cpp, "Hirschberg linear space global alignment", release_gil());
+    m.def("nw_score_cpp", &nw_score_cpp, "Linear-space Needleman-Wunsch score (no traceback)", release_gil());
 }

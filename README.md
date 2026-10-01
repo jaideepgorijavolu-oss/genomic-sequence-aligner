@@ -26,7 +26,7 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 ### 4. Hirschberg's Algorithm (Linear-Space Alignment)
 - **Goal:** Mitigates quadratic space exhaustion on chromosome-scale sequences.
 - **Recurrence:** Combines forward and backward dynamic programming passes with divide-and-conquer recursion to compute optimal alignment tracebacks.
-- **Complexity:** $\mathcal{O}(m \cdot n)$ time, $\mathcal{O}(\min(m, n))$ space.
+- **Complexity:** $\mathcal{O}(m \cdot n)$ time, $\mathcal{O}(\min(m, n))$ DP memory (shorter sequence is kept on the DP row).
 
 ---
 
@@ -34,24 +34,27 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 
 - **Dual-Backend Architecture:** Toggle compiled C++ vs. pure Python backends via `use_cpp=True/False`.
 - **Cache-Aligned Memory Optimization:** C++ core utilizes flattened 1D contiguous vectors (`std::vector<int>`) to maximize L1/L2 cache locality and bypass CPython boxing.
-- **Competitive Throughput:** Consistently achieves up to a **93.9x speedup over pure Python** and executes **1.5x–1.9x faster than Biopython's C core**.
+- **Verified Throughput:** See the benchmark table; speedups are only reported for runs whose scores match Biopython.
+- **GIL-free kernels:** C++ calls release the GIL, so alignments in multiple threads run in parallel.
+- **CLI:** `seqalign` / `python align_cli.py` aligns raw sequences or FASTA files with a BLAST-style view and identity stats.
+- **Safe inputs:** case-insensitive by default, ASCII-only, and a `max_cells` guard that points to Hirschberg instead of exhausting RAM.
 - **Full Traceback Reconstruction:** Outputs aligned query/reference sequence pairs formatted with gap tokens (`-`).
-- **Comprehensive Verification:** Unit testing suite powered by `pytest` verifying algorithm parity, affine behavior, and memory equivalence.
+- **Comprehensive Verification:** 33 pytest cases: every algorithm on both backends, randomized optimality checks against Biopython, alignment validity (gap-stripped strings reproduce the inputs, rescored alignment equals the reported score), exact C++/Python parity, edge cases; CI on Linux/Windows/macOS.
 
 ---
 
 ## Performance Benchmark
 
-Benchmarked across identical random DNA sequences comparing pure Python, Biopython (`Bio.Align.PairwiseAligner`), and custom C++ (`benchmark.py`):
+`python benchmark.py`: random DNA pairs (5 per length, median of 5 runs each); every configuration is checked to return Biopython's optimal score before it is timed. "Full" = alignment with traceback, "score-only" = linear-space DP without traceback (`SequenceAligner.score` vs `PairwiseAligner.score`). Measured on Windows x64, Python 3.14, clang -O3 build; results vary by machine and compiler.
 
-| Sequence Length (bp) | Pure Python (s) | Biopython (s) | Custom C++ (s) | Speedup vs Py | Speedup vs Bio |
-|:---------------------|:----------------|:--------------|:---------------|:--------------|:---------------|
-| 50                   | 0.00109         | 0.00002       | 0.00002        | 65.0x         | 1.5x           |
-| 100                  | 0.00542         | 0.00011       | 0.00006        | 93.9x         | 1.8x           |
-| 200                  | 0.01856         | 0.00043       | 0.00022        | 84.8x         | 1.9x           |
-| 400                  | 0.06480         | 0.00166       | 0.00085        | 76.2x         | 1.9x           |
-| 800                  | 0.28018         | 0.00665       | 0.00407        | 68.8x         | 1.6x           |
-| 1200                 | 0.68223         | 0.01518       | 0.00872        | 78.3x         | 1.7x           |
+| Length (bp) | Python full (s) | C++ full (s) | Biopython full (s) | C++ score-only (s) | Biopython score-only (s) | C++ vs Py | C++ vs Bio (full) | C++ vs Bio (score) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 0.00298 | 0.00002 | 0.00005 | 0.00001 | 0.00002 | 151.8x | 2.6x | 1.6x |
+| 250 | 0.01836 | 0.00011 | 0.00053 | 0.00008 | 0.00013 | 168.7x | 4.8x | 1.7x |
+| 500 | 0.08134 | 0.00061 | 0.00191 | 0.00030 | 0.00055 | 132.4x | 3.1x | 1.8x |
+| 1000 | 0.33946 | 0.00233 | 0.00784 | 0.00123 | 0.00214 | 145.5x | 3.4x | 1.7x |
+| 2000 | - | 0.00963 | 0.03164 | 0.00521 | 0.00891 | - | 3.3x | 1.7x |
+| 4000 | - | 0.03839 | 0.12345 | 0.01980 | 0.03516 | - | 3.2x | 1.8x |
 
 ![Benchmark Plot](complexity_benchmark.png)
 
@@ -94,7 +97,14 @@ pip install -r requirements.txt
 ### 2. Compile C++ Core Extension
 
 ```bash
-python setup.py build_ext --inplace
+python setup.py build_ext --inplace   # or: pip install .  (also installs the `seqalign` CLI)
+```
+
+### 3. Command Line
+
+```bash
+python align_cli.py ACGTTTTACG ACGACG --mode affine
+python align_cli.py query.fasta reference.fasta --mode local
 ```
 
 ---
