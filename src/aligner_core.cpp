@@ -6,6 +6,7 @@
 #include <tuple>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <stdexcept>
 #include <thread>
 #include <atomic>
