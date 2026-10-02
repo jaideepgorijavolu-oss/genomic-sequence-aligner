@@ -1,0 +1,8 @@
+[build-system]
+# Lets `pip install .` compile the C++ extension in an isolated build env.
+requires = ["setuptools>=68", "pybind11>=2.12"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
