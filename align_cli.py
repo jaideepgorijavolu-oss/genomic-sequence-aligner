@@ -4,12 +4,14 @@ Command-line pairwise aligner.
     seqalign GATTACA GCATGCU
     seqalign query.fasta reference.fasta --mode local
     python align_cli.py ACGTTTTACG ACGACG --mode affine --gap-open -5 --gap-extend -1
+
+    seqalign search query.fasta database.fasta --matrix BLOSUM62 --top 10
 """
 import argparse
 import os
 import sys
 
-from aligner import SequenceAligner, alignment_stats, format_alignment
+from aligner import LocalSearch, SequenceAligner, alignment_stats, format_alignment
 
 MODES = {
     "global": "needleman_wunsch",
@@ -19,26 +21,72 @@ MODES = {
 }
 
 
-def read_sequence(arg: str) -> tuple:
-    """Return (name, sequence) from a FASTA/plain-text file path, or treat arg as a literal sequence."""
-    if not os.path.isfile(arg):
-        return "seq", arg.strip()
-    name, chunks = os.path.basename(arg), []
-    with open(arg) as f:
+def read_fasta(path: str) -> list:
+    """All (name, sequence) records in a FASTA file; a file without headers is one record."""
+    records, name, chunks = [], os.path.basename(path), []
+    with open(path) as f:
         for line in f:
             line = line.strip()
             if line.startswith(">"):
                 if chunks:
-                    break  # first record only
-                name = line[1:].split()[0] if len(line) > 1 else name
+                    records.append((name, "".join(chunks)))
+                name, chunks = (line[1:].split() or [os.path.basename(path)])[0], []
             elif line:
                 chunks.append(line)
-    if not chunks:
+    if chunks:
+        records.append((name, "".join(chunks)))
+    return records
+
+
+def read_sequence(arg: str) -> tuple:
+    """Return (name, sequence) from a FASTA/plain-text file path (first record), or treat arg as a literal sequence."""
+    if not os.path.isfile(arg):
+        return "seq", arg.strip()
+    records = read_fasta(arg)
+    if not records:
         raise SystemExit(f"{arg}: no sequence found")
-    return name, "".join(chunks)
+    return records[0]
+
+
+def search_main(argv) -> int:
+    p = argparse.ArgumentParser(prog="seqalign search",
+                                description="Rank database sequences by local alignment score against a query")
+    p.add_argument("query", help="query sequence or FASTA file (first record)")
+    p.add_argument("database", help="FASTA file of target sequences")
+    p.add_argument("--matrix", default="BLOSUM62", help="substitution matrix, or 'none' for match/mismatch")
+    p.add_argument("--match", type=int, default=2)
+    p.add_argument("--mismatch", type=int, default=-1)
+    p.add_argument("--gap-open", type=int, default=-11)
+    p.add_argument("--gap-extend", type=int, default=-1)
+    p.add_argument("--top", type=int, default=10)
+    p.add_argument("--threads", type=int, default=0, help="0 = all cores")
+    args = p.parse_args(argv)
+
+    qname, query = read_sequence(args.query)
+    records = read_fasta(args.database)
+    if not records:
+        raise SystemExit(f"{args.database}: no sequences found")
+    matrix = None if args.matrix.lower() == "none" else args.matrix
+    try:
+        search = LocalSearch(query, matrix=matrix, match_score=args.match, mismatch_penalty=args.mismatch,
+                             gap_open=args.gap_open, gap_extend=args.gap_extend)
+        hits = search.top([seq for _, seq in records], k=args.top, threads=args.threads)
+    except ValueError as e:
+        raise SystemExit(str(e))
+    print(f"# query {qname} ({len(query)} residues) vs {len(records):,} sequences | "
+          f"matrix={matrix or 'match/mismatch'} gap_open={args.gap_open} gap_extend={args.gap_extend} "
+          f"backend={search.backend}")
+    print(f"{'rank':>4}  {'score':>6}  {'length':>6}  name")
+    for rank, (i, score) in enumerate(hits, 1):
+        name, seq = records[i]
+        print(f"{rank:>4}  {score:>6}  {len(seq):>6}  {name}")
+    return 0
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "search":
+        return search_main(argv[1:])
     p = argparse.ArgumentParser(description="Pairwise sequence alignment (C++ core with Python fallback)")
     p.add_argument("seq1", help="sequence or FASTA file")
     p.add_argument("seq2", help="sequence or FASTA file")

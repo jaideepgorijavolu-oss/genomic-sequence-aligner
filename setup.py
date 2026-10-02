@@ -8,14 +8,15 @@ ext_modules = [
         "aligner_core",
         ["src/aligner_core.cpp"],
         cxx_std=17,
-        extra_compile_args=["/O2"] if sys.platform.startswith("win") else ["-O3"],
+        extra_compile_args=["/O2"] if sys.platform.startswith("win") else ["-O3", "-pthread"],
+        extra_link_args=[] if sys.platform.startswith("win") else ["-pthread"],
     ),
 ]
 
 setup(
     name="genomic-sequence-aligner",
-    version="0.2.0",
-    description="Pairwise sequence alignment (NW, SW, Gotoh, Hirschberg) with a pybind11 C++ core",
+    version="0.3.0",
+    description="Pairwise alignment (NW, SW, Gotoh, Hirschberg) and SIMD multithreaded local search, C++/pybind11",
     python_requires=">=3.9",
     py_modules=["aligner", "align_cli"],
     ext_modules=ext_modules,

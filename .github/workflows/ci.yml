@@ -27,3 +27,7 @@ jobs:
         run: python -m pytest -v
       - name: CLI smoke test
         run: python align_cli.py ACGTTTTACG ACGACG --mode affine
+      - name: Search CLI smoke test
+        run: |
+          python -c "open('q.fa','w').write('>q\nMKTAYIAKQRQISFVKSHFSRQ\n'); open('db.fa','w').write('>hit\nMKTAYIAKQRQLSFVKSHF\n>decoy\nGGGGPPPPGGGG\n')"
+          python align_cli.py search q.fa db.fa --top 2

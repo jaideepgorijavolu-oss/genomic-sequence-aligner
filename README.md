@@ -1,5 +1,7 @@
 # Pairwise Genomic Sequence Alignment Engine (C++ / Python)
 
+**Highlights:** SSE2-vectorized striped Smith-Waterman (Farrar) with affine gaps and BLOSUM62 · multithreaded protein database search at **50 GCUPS (375× Biopython)** · Needleman-Wunsch, Gotoh and linear-space Hirschberg with full traceback · every result verified against Biopython.
+
 A high-performance algorithmic engine implementing dynamic programming algorithms for pairwise biological sequence alignment (DNA/RNA/Protein): **Needleman-Wunsch** (Global Alignment), **Smith-Waterman** (Local Alignment), **Gotoh** (Affine Gap Penalties), and **Hirschberg** (Linear-Space Global Alignment).
 
 Features a modular dual-backend architecture: an optimized **C++ extension via `pybind11`** utilizing contiguous 1D row-major indexing for cache efficiency, alongside an interpretable pure-Python reference implementation with automatic fallback.
@@ -28,6 +30,13 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 - **Recurrence:** Combines forward and backward dynamic programming passes with divide-and-conquer recursion to compute optimal alignment tracebacks.
 - **Complexity:** $\mathcal{O}(m \cdot n)$ time, $\mathcal{O}(\min(m, n))$ DP memory (shorter sequence is kept on the DP row).
 
+### 5. Striped SIMD Smith-Waterman Search (Farrar 2007)
+- **Goal:** Database search: score one query against thousands of sequences (the SSEARCH/SSW workload).
+- **Scoring:** Affine gaps and any 256×256 substitution table: BLOSUM62 for proteins, match/mismatch for DNA.
+- **Vectorization:** The query is interleaved into 8 stripes across the int16 lanes of an SSE2 register via a precomputed query profile; vertical-gap dependencies are resolved with Farrar's lazy-F loop. 16-bit saturating arithmetic, with automatic exact 32-bit rescoring when a score nears the int16 limit.
+- **Parallelism:** `std::thread` pool with dynamic chunk scheduling across targets; the GIL is released for the whole search.
+- **Portability:** SSE2 is baseline on x86-64 (MSVC, GCC, Clang); other CPUs (e.g. Apple Silicon) automatically use the scalar kernel.
+
 ---
 
 ## Features
@@ -39,11 +48,30 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 - **CLI:** `seqalign` / `python align_cli.py` aligns raw sequences or FASTA files with a BLAST-style view and identity stats.
 - **Safe inputs:** case-insensitive by default, ASCII-only, and a `max_cells` guard that points to Hirschberg instead of exhausting RAM.
 - **Full Traceback Reconstruction:** Outputs aligned query/reference sequence pairs formatted with gap tokens (`-`).
-- **Comprehensive Verification:** 33 pytest cases: every algorithm on both backends, randomized optimality checks against Biopython, alignment validity (gap-stripped strings reproduce the inputs, rescored alignment equals the reported score), exact C++/Python parity, edge cases; CI on Linux/Windows/macOS.
+- **Database Search:** `LocalSearch(query, matrix="BLOSUM62").top(database, k=10)` and `seqalign search query.fa db.fa`.
+- **Comprehensive Verification:** 48 pytest cases: every algorithm on both backends, randomized optimality checks against Biopython (including BLOSUM62 local search across four gap settings), SIMD-vs-scalar equivalence on odd query lengths and the int16 overflow path, deterministic multithreading, alignment validity (gap-stripped strings reproduce the inputs, rescored alignment equals the reported score), exact C++/Python parity, edge cases; CI on Linux/Windows/macOS.
 
 ---
 
-## Performance Benchmark
+## Database Search Benchmark
+
+`python benchmark_search.py`: a 350-residue query against 5,000 synthetic proteins (1.72M residues, UniProt amino-acid composition, lognormal lengths, planted homologs), BLOSUM62 with BLASTP gap costs (open 11, extend 1). GCUPS = query length × database residues / seconds. Scores from every engine are asserted identical to Biopython's before timing. Measured on an AMD Ryzen 9 270 (8 cores / 16 threads), Windows, clang -O3 build.
+
+| Engine | Threads | GCUPS | Speedup vs Biopython |
+|:---|---:|---:|---:|
+| Biopython PairwiseAligner (C) | 1 | 0.134 | 1.0x |
+| C++ scalar (int32) | 1 | 0.208 | 1.5x |
+| C++ SSE2 striped | 1 | 5.674 | 42.3x |
+| C++ SSE2 striped | 2 | 10.646 | 79.3x |
+| C++ SSE2 striped | 4 | 20.124 | 149.9x |
+| C++ SSE2 striped | 8 | 35.016 | 260.8x |
+| C++ SSE2 striped | 16 | 50.351 | 375.1x |
+
+The vectorized kernel is 27× faster than the scalar kernel on one core, and thread scaling is near-linear up to the 8 physical cores, with a further 1.4× from SMT.
+
+![Search scaling](search_scaling.png)
+
+## Pairwise Alignment Benchmark
 
 `python benchmark.py`: random DNA pairs (5 per length, median of 5 runs each); every configuration is checked to return Biopython's optimal score before it is timed. "Full" = alignment with traceback, "score-only" = linear-space DP without traceback (`SequenceAligner.score` vs `PairwiseAligner.score`). Measured on Windows x64, Python 3.14, clang -O3 build; results vary by machine and compiler.
 
@@ -65,9 +93,12 @@ Features a modular dual-backend architecture: an optimized **C++ extension via `
 ```text
 genomic-sequence-aligner/
 ├── src/
-│   └── aligner_core.cpp      # C++ DP kernels (NW, SW, Gotoh, Hirschberg) via pybind11
+│   └── aligner_core.cpp      # C++ kernels: NW, SW, Gotoh, Hirschberg, SSE2 striped search
 ├── aligner.py                # Python API exposing dynamic C++/Python backend selection
 ├── benchmark.py              # 3-way empirical runtime profiler & matplotlib plotting
+├── benchmark_search.py       # GCUPS / thread-scaling benchmark for SIMD database search
+├── align_cli.py              # seqalign CLI: pairwise alignment and database search
+├── test_search.py            # LocalSearch verification (Biopython, SIMD vs scalar, threads)
 ├── test_aligner.py           # Pytest unit verification suite
 ├── setup.py                  # C++ extension compilation script
 ├── complexity_benchmark.png  # Generated runtime scaling comparison
@@ -105,6 +136,7 @@ python setup.py build_ext --inplace   # or: pip install .  (also installs the `s
 ```bash
 python align_cli.py ACGTTTTACG ACGACG --mode affine
 python align_cli.py query.fasta reference.fasta --mode local
+python align_cli.py search query.fasta database.fasta --matrix BLOSUM62 --top 10   # ranked hits
 ```
 
 ---
@@ -143,6 +175,17 @@ print(f"\nHirschberg Linear-Space (Score: {hirsch_score}):\n{h1}\n{h2}")
 
 ---
 
+### Database search
+
+```python
+from aligner import LocalSearch
+
+search = LocalSearch("MKTAYIAKQRQISFVKSHFSRQ", matrix="BLOSUM62", gap_open=-11, gap_extend=-1)
+search.score("MKTAYIAKQRQLSFVKSHF")          # best local alignment score
+search.search(database_sequences, threads=0)  # scores for every target, all cores
+search.top(database_sequences, k=10)          # [(index, score), ...] best first
+```
+
 ## Verification & Profiling
 
 ```bash
@@ -151,4 +194,7 @@ pytest -v
 
 # Run comparative 3-way benchmark against Biopython
 python benchmark.py
+
+# Database-search throughput (GCUPS) and thread scaling
+python benchmark_search.py
 ```

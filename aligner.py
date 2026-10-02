@@ -55,6 +55,140 @@ def format_alignment(aligned1: str, aligned2: str, width: int = 60) -> str:
     return "\n\n".join(blocks)
 
 
+# --- Substitution matrices ------------------------------------------------------------
+
+_BLOSUM62_ALPHABET = "ARNDCQEGHILKMFPSTWYVBZX*"
+_BLOSUM62_ROWS = """
+ 4 -1 -2 -2  0 -1 -1  0 -2 -1 -1 -1 -1 -2 -1  1  0 -3 -2  0 -2 -1  0 -4
+-1  5  0 -2 -3  1  0 -2  0 -3 -2  2 -1 -3 -2 -1 -1 -3 -2 -3 -1  0 -1 -4
+-2  0  6  1 -3  0  0  0  1 -3 -3  0 -2 -3 -2  1  0 -4 -2 -3  3  0 -1 -4
+-2 -2  1  6 -3  0  2 -1 -1 -3 -4 -1 -3 -3 -1  0 -1 -4 -3 -3  4  1 -1 -4
+ 0 -3 -3 -3  9 -3 -4 -3 -3 -1 -1 -3 -1 -2 -3 -1 -1 -2 -2 -1 -3 -3 -2 -4
+-1  1  0  0 -3  5  2 -2  0 -3 -2  1  0 -3 -1  0 -1 -2 -1 -2  0  3 -1 -4
+-1  0  0  2 -4  2  5 -2  0 -3 -3  1 -2 -3 -1  0 -1 -3 -2 -2  1  4 -1 -4
+ 0 -2  0 -1 -3 -2 -2  6 -2 -4 -4 -2 -3 -3 -2  0 -2 -2 -3 -3 -1 -2 -1 -4
+-2  0  1 -1 -3  0  0 -2  8 -3 -3 -1 -2 -1 -2 -1 -2 -2  2 -3  0  0 -1 -4
+-1 -3 -3 -3 -1 -3 -3 -4 -3  4  2 -3  1  0 -3 -2 -1 -3 -1  3 -3 -3 -1 -4
+-1 -2 -3 -4 -1 -2 -3 -4 -3  2  4 -2  2  0 -3 -2 -1 -2 -1  1 -4 -3 -1 -4
+-1  2  0 -1 -3  1  1 -2 -1 -3 -2  5 -1 -3 -1  0 -1 -3 -2 -2  0  1 -1 -4
+-1 -1 -2 -3 -1  0 -2 -3 -2  1  2 -1  5  0 -2 -1 -1 -1 -1  1 -3 -1 -1 -4
+-2 -3 -3 -3 -2 -3 -3 -3 -1  0  0 -3  0  6 -4 -2 -2  1  3 -1 -3 -3 -1 -4
+-1 -2 -2 -1 -3 -1 -1 -2 -2 -3 -3 -1 -2 -4  7 -1 -1 -4 -3 -2 -2 -1 -2 -4
+ 1 -1  1  0 -1  0  0  0 -1 -2 -2  0 -1 -2 -1  4  1 -3 -2 -2  0  0  0 -4
+ 0 -1  0 -1 -1 -1 -1 -2 -2 -1 -1 -1 -1 -2 -1  1  5 -2 -2  0 -1 -1  0 -4
+-3 -3 -4 -4 -2 -2 -3 -2 -2 -3 -2 -3 -1  1 -4 -3 -2 11  2 -3 -4 -3 -2 -4
+-2 -2 -2 -3 -2 -1 -2 -3  2 -1 -1 -2 -1  3 -3 -2 -2  2  7 -1 -3 -2 -1 -4
+ 0 -3 -3 -3 -1 -2 -2 -3 -3  3  1 -2  1 -1 -2 -2  0 -3 -1  4 -3 -2 -1 -4
+-2 -1  3  4 -3  0  1 -1  0 -3 -4  0 -3 -3 -2  0 -1 -4 -3 -3  4  1 -1 -4
+-1  0  0  1 -3  3  4 -2  0 -3 -3  1 -1 -3 -1  0 -1 -3 -2 -2  1  4 -1 -4
+ 0 -1 -1 -1 -2 -1 -1 -1 -1 -1 -1 -1 -1 -1 -2  0  0 -2 -1 -1 -1 -1 -1 -4
+-4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4  1
+"""
+
+MATRICES = {
+    "BLOSUM62": {
+        (a, b): int(v)
+        for a, row in zip(_BLOSUM62_ALPHABET, _BLOSUM62_ROWS.split("\n")[1:-1])
+        for b, v in zip(_BLOSUM62_ALPHABET, row.split())
+    }
+}
+
+
+def substitution_table(matrix: str = None, match_score: int = 2, mismatch_penalty: int = -1,
+                       case_sensitive: bool = False) -> list:
+    """
+    Flattened 256x256 score table indexed [a * 256 + b] by byte value. With a named matrix,
+    letters are case-folded and symbols outside its alphabet score as 'X' (unknown residue).
+    """
+    fold = (lambda c: c) if case_sensitive and matrix is None else (lambda c: c.upper())
+    chars = [fold(chr(x)) for x in range(256)]
+    if matrix is None:
+        return [match_score if a == b else mismatch_penalty for a in chars for b in chars]
+    try:
+        scores = MATRICES[matrix.upper()]
+    except KeyError:
+        raise ValueError(f"unknown matrix {matrix!r}; available: {sorted(MATRICES)}") from None
+    alphabet = {a for a, _ in scores}
+    chars = [c if c in alphabet else "X" for c in chars]
+    return [scores[a, b] for a in chars for b in chars]
+
+
+class LocalSearch:
+    """
+    One query against many targets: best local-alignment (Smith-Waterman) score with affine
+    gaps (a gap of length k scores gap_open + k * gap_extend), using either a substitution
+    matrix (e.g. "BLOSUM62") or match/mismatch scores.
+
+    The C++ backend uses an SSE2 striped kernel (Farrar 2007) with multithreaded search;
+    the Python backend is an exact reference implementation of the same recurrence.
+    Defaults match BLASTP's gap costs (open 11, extend 1).
+    """
+
+    def __init__(self, query: str, matrix: str = None, match_score: int = 2, mismatch_penalty: int = -1,
+                 gap_open: int = -11, gap_extend: int = -1, use_cpp: bool = True, case_sensitive: bool = False):
+        _check_sequence(query)
+        if gap_open > 0 or gap_extend > 0:
+            raise ValueError("gap_open and gap_extend must be <= 0")
+        self.query = query
+        self.gap_open, self.gap_extend = gap_open, gap_extend
+        self.table = substitution_table(matrix, match_score, mismatch_penalty, case_sensitive)
+        self.use_cpp = use_cpp and CPP_AVAILABLE
+        self._core = aligner_core.LocalScorer(query, self.table, gap_open, gap_extend) if self.use_cpp else None
+
+    @property
+    def backend(self) -> str:
+        if not self.use_cpp:
+            return "python"
+        return "cpp-sse2" if self._core.simd_enabled else "cpp-scalar"
+
+    def score(self, target: str) -> int:
+        _check_sequence(target)
+        if self._core is not None:
+            return self._core.score(target)
+        return self._score_py(target)
+
+    def search(self, targets, threads: int = 0) -> list:
+        """Scores for every target, in order. threads=0 uses all cores (C++ backend)."""
+        targets = list(targets)
+        for t in targets:
+            _check_sequence(t)
+        if self._core is not None:
+            return self._core.score_many(targets, threads)
+        return [self._score_py(t) for t in targets]
+
+    def top(self, targets, k: int = 10, threads: int = 0) -> list:
+        """The k best (index, score) hits, highest score first."""
+        scores = self.search(targets, threads)
+        return sorted(enumerate(scores), key=lambda hit: (-hit[1], hit[0]))[:k]
+
+    def _score_py(self, target: str) -> int:
+        q = [ord(c) * 256 for c in self.query]
+        m = len(q)
+        if m == 0 or not target:
+            return 0
+        open_cost, ext_cost = -(self.gap_open + self.gap_extend), -self.gap_extend
+        table = self.table
+        H, E = [0] * (m + 1), [0] * (m + 1)
+        best = 0
+        for t in map(ord, target):
+            diag = h_up = f = 0
+            for i in range(1, m + 1):
+                e = max(E[i] - ext_cost, H[i] - open_cost)
+                f = max(f - ext_cost, h_up - open_cost)
+                h = max(0, diag + table[q[i - 1] + t], e, f)
+                diag, H[i], E[i], h_up = H[i], h, e, h
+                if h > best:
+                    best = h
+        return best
+
+
+def _check_sequence(s) -> None:
+    if not isinstance(s, str):
+        raise TypeError(f"sequences must be str, got {type(s).__name__}")
+    if not s.isascii():
+        raise ValueError("sequences must be ASCII")
+
+
 class SequenceAligner:
     """
     High-Performance Pairwise Sequence Alignment Engine.
