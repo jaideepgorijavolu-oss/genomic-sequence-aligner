@@ -183,10 +183,24 @@ class LocalSearch:
 
 
 def _check_sequence(s) -> None:
+    """
+    Accepted input: printable, non-whitespace ASCII except '-'. Every other character is an
+    ordinary residue symbol: with match/mismatch scoring, identical symbols match (so 'N'
+    matches 'N'); with a substitution matrix, symbols outside its alphabet score as 'X'.
+    '-' is reserved as the gap character in alignment output, so a literal '-' in the input
+    would be scored as a residue by the DP but as a gap when an alignment is rescored.
+    Whitespace is rejected rather than silently stripped (the CLI strips FASTA line breaks).
+    """
     if not isinstance(s, str):
         raise TypeError(f"sequences must be str, got {type(s).__name__}")
     if not s.isascii():
         raise ValueError("sequences must be ASCII")
+    if "-" in s:
+        raise ValueError("sequences must not contain '-' (reserved for gaps in alignment output); "
+                         "remove gaps from pre-aligned input first")
+    bad = next((c for c in s if not c.isprintable() or c.isspace()), None)
+    if bad is not None:
+        raise ValueError(f"sequences must not contain whitespace or control characters (found {bad!r})")
 
 
 class SequenceAligner:
@@ -231,12 +245,9 @@ class SequenceAligner:
     # --- Input handling ---
 
     def _prepare(self, seq1: str, seq2: str, full_matrix: bool = True) -> Tuple[str, str]:
-        for s in (seq1, seq2):
-            if not isinstance(s, str):
-                raise TypeError(f"sequences must be str, got {type(s).__name__}")
-            if not s.isascii():
-                # The C++ core compares bytes; multi-byte UTF-8 would silently misalign.
-                raise ValueError("sequences must be ASCII")
+        # ASCII only: the C++ core compares bytes, so multi-byte UTF-8 would silently misalign.
+        _check_sequence(seq1)
+        _check_sequence(seq2)
         if full_matrix and (len(seq1) + 1) * (len(seq2) + 1) > self.max_cells:
             raise ValueError(
                 f"{len(seq1)}x{len(seq2)} needs a full DP matrix larger than max_cells={self.max_cells:,}; "
@@ -389,8 +400,9 @@ class SequenceAligner:
         for i in range(1, m + 1):
             for j in range(1, n + 1):
                 M[i][j] = max(M[i - 1][j - 1], X[i - 1][j - 1], Y[i - 1][j - 1]) + self._sub(seq1[i - 1], seq2[j - 1])
-                X[i][j] = max(M[i - 1][j] + go + ge, X[i - 1][j] + ge)
-                Y[i][j] = max(M[i][j - 1] + go + ge, Y[i][j - 1] + ge)
+                # A gap may directly follow a gap in the other sequence (a new gap opens).
+                X[i][j] = max(M[i - 1][j] + go + ge, X[i - 1][j] + ge, Y[i - 1][j] + go + ge)
+                Y[i][j] = max(M[i][j - 1] + go + ge, Y[i][j - 1] + ge, X[i][j - 1] + go + ge)
 
         best = max(M[m][n], X[m][n], Y[m][n])
         # Same end-state preference as the C++ core on ties: X, then Y, then M.
@@ -408,12 +420,14 @@ class SequenceAligner:
             elif state == "X":
                 aligned1.append(seq1[i - 1])
                 aligned2.append('-')
-                state = "M" if X[i][j] == M[i - 1][j] + go + ge else "X"
+                here = X[i][j]
+                state = "M" if here == M[i - 1][j] + go + ge else ("X" if here == X[i - 1][j] + ge else "Y")
                 i -= 1
             else:
                 aligned1.append('-')
                 aligned2.append(seq2[j - 1])
-                state = "M" if Y[i][j] == M[i][j - 1] + go + ge else "Y"
+                here = Y[i][j]
+                state = "M" if here == M[i][j - 1] + go + ge else ("Y" if here == Y[i][j - 1] + ge else "X")
                 j -= 1
 
         return "".join(reversed(aligned1)), "".join(reversed(aligned2)), best

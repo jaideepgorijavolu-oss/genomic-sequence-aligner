@@ -194,15 +194,20 @@ std::tuple<std::string, std::string, int> gotoh_cpp(
             int score = (seq1[i - 1] == seq2[j - 1]) ? match_score : mismatch_penalty;
             M[idx(i, j, stride)] = prev_best + score;
 
-            Ix[idx(i, j, stride)] = std::max(
+            // A gap may follow a gap in the other sequence (opening a new gap), as in
+            // Biopython's PairwiseAligner; without this, e.g. "A" vs "T" with a large
+            // mismatch penalty cannot take the cheaper "A-"/"-T" alignment.
+            Ix[idx(i, j, stride)] = std::max({
                 M[idx(i - 1, j, stride)] + gap_open + gap_extend,
-                Ix[idx(i - 1, j, stride)] + gap_extend
-            );
+                Ix[idx(i - 1, j, stride)] + gap_extend,
+                Iy[idx(i - 1, j, stride)] + gap_open + gap_extend
+            });
 
-            Iy[idx(i, j, stride)] = std::max(
+            Iy[idx(i, j, stride)] = std::max({
                 M[idx(i, j - 1, stride)] + gap_open + gap_extend,
-                Iy[idx(i, j - 1, stride)] + gap_extend
-            );
+                Iy[idx(i, j - 1, stride)] + gap_extend,
+                Ix[idx(i, j - 1, stride)] + gap_open + gap_extend
+            });
         }
     }
 
@@ -231,19 +236,25 @@ std::tuple<std::string, std::string, int> gotoh_cpp(
         } else if (current_state == STATE_IX) {
             aligned1 += seq1[i - 1];
             aligned2 += '-';
-            if (Ix[idx(i, j, stride)] == M[idx(i - 1, j, stride)] + gap_open + gap_extend) {
+            const int here = Ix[idx(i, j, stride)];
+            if (here == M[idx(i - 1, j, stride)] + gap_open + gap_extend) {
                 current_state = STATE_M;
-            } else {
+            } else if (here == Ix[idx(i - 1, j, stride)] + gap_extend) {
                 current_state = STATE_IX;
+            } else {
+                current_state = STATE_IY;
             }
             --i;
         } else {
             aligned1 += '-';
             aligned2 += seq2[j - 1];
-            if (Iy[idx(i, j, stride)] == M[idx(i, j - 1, stride)] + gap_open + gap_extend) {
+            const int here = Iy[idx(i, j, stride)];
+            if (here == M[idx(i, j - 1, stride)] + gap_open + gap_extend) {
                 current_state = STATE_M;
-            } else {
+            } else if (here == Iy[idx(i, j - 1, stride)] + gap_extend) {
                 current_state = STATE_IY;
+            } else {
+                current_state = STATE_IX;
             }
             --j;
         }
