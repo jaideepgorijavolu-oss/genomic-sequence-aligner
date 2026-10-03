@@ -11,7 +11,7 @@ multithreaded Smith-Waterman search kernel** (Farrar's striped algorithm, the ap
 - **50.4 GCUPS** protein database search on a laptop CPU (16 threads): **375× Biopython**, **27× a scalar C++ kernel** on one core
 - **5 algorithms:** Needleman-Wunsch, Smith-Waterman, Gotoh (affine gaps), Hirschberg (linear space), striped SIMD local search
 - **BLOSUM62 and affine gaps** (BLASTP defaults), plus match/mismatch scoring for DNA
-- **Correctness verified:** 48 tests; over 5,000 randomized sequence pairs checked against Biopython and between the C++ and pure-Python backends
+- **Correctness verified:** 89 tests; over 7,500 randomized sequence pairs checked against Biopython and between the C++ and pure-Python backends
 - **Benchmarks gated on correctness:** no speedup is reported unless the engine's scores equal Biopython's on the same inputs
 - **Usable as a tool:** `seqalign` CLI for FASTA alignment and ranked database search; CI on Linux, Windows and macOS
 
@@ -87,7 +87,7 @@ Pure Python is only timed up to 1,000 bp (0.34 s per alignment).
 
 | What is checked | How |
 |:---|:---|
-| Optimality | Scores equal Biopython's on randomized DNA and protein pairs: global, local, affine, and BLOSUM62 local search under 4 gap settings, on both unrelated and mutated (homologous) pairs |
+| Optimality | Scores equal Biopython's on randomized DNA and protein pairs: global, local and affine alignment under 7 scoring regimes (including large mismatch penalties, where an insertion followed by a deletion beats a substitution), and local search under 8 scoring settings including BLOSUM62, on both unrelated and mutated (homologous) pairs |
 | Alignment validity | Removing gaps reproduces both input sequences, and rescoring the alignment from scratch equals the reported score |
 | Backend parity | C++ and pure-Python implementations return *identical* alignments (same tie-breaking) |
 | SIMD correctness | Striped kernel equals the scalar kernel across query lengths around every lane/segment boundary (1, 7, 8, 9 … 1001) |
@@ -101,6 +101,8 @@ Python) on Ubuntu, Windows and macOS × Python 3.10 / 3.12.
 ---
 
 ## Quickstart
+
+**Prerequisites:** Python 3.9+ and a C++17 compiler: MSVC (Visual Studio Build Tools, "Desktop development with C++") on Windows, GCC 7+ or Clang 5+ on Linux, Xcode Command Line Tools (`xcode-select --install`) on macOS. Without a compiler everything still runs on the pure-Python backend, just slower.
 
 ```bash
 git clone https://github.com/jaideepgorijavolu-oss/genomic-sequence-aligner.git
@@ -123,13 +125,15 @@ ACGTTTTACG
 |||    |||
 ACG----ACG
 
-$ python align_cli.py search query.fasta database.fasta --matrix BLOSUM62 --top 3
-# query q (22 residues) vs 4 sequences | matrix=BLOSUM62 gap_open=-11 gap_extend=-1 backend=cpp-sse2
+$ python align_cli.py search examples/query.fasta examples/database.fasta --matrix BLOSUM62 --top 3
+# query query (22 residues) vs 4 sequences | matrix=BLOSUM62 gap_open=-11 gap_extend=-1 backend=cpp-sse2
 rank   score  length  name
    1     109      22  hit_exact
-   2      93      19  hit_mut
-   3       2       8  decoy2
+   2      93      19  hit_mutated
+   3       2       8  decoy_2
 ```
+
+Example inputs are in [`examples/`](examples/) (`python align_cli.py examples/dna1.fasta examples/dna2.fasta --mode local`).
 
 Modes: `global` (Needleman-Wunsch), `local` (Smith-Waterman), `affine` (Gotoh), `linear-space` (Hirschberg).
 
@@ -152,7 +156,7 @@ search.search(database, threads=0)        # scores for every target, all cores
 search.top(database, k=10)                # [(index, score), ...] best first
 ```
 
-Inputs are case-insensitive by default and must be ASCII. Full-matrix methods refuse inputs larger than
+**Accepted input:** printable ASCII without whitespace or `-` (reserved for gaps in output; strip gaps from pre-aligned sequences first). Matching is case-insensitive by default. Any other symbol is an ordinary residue: with match/mismatch scoring identical symbols match (`N` matches `N`); with BLOSUM62, symbols outside its alphabet score as `X`. The CLI joins multi-line FASTA records. Full-matrix methods refuse inputs larger than
 `max_cells` (default 10⁸ cells) and point to `hirschberg()` instead of exhausting memory.
 
 ---
@@ -171,3 +175,7 @@ genomic-sequence-aligner/
 ├── setup.py / pyproject.toml
 └── .github/workflows/ci.yml
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
